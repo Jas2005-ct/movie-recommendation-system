@@ -116,27 +116,39 @@ class MovieDetailHTMLView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
-        movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-        # Fetch refined crew details for the template
-        # Passing person objects for director and main_actor as template uses .name
-        # Using model properties for other roles as they are returned as comma-separated strings
-        director = movie.crew.filter(role='Director').select_related('person').first()
-        main_actor = movie.crew.filter(role='Main Actor').select_related('person').first()
+        movie   = get_object_or_404(
+            Movie.objects.prefetch_related('genres'), tmdb_id=tmdb_id
+        )
+
+        # Load the whole crew in a single query and group it by role. The
+        # Movie model helper properties issue one query per role, so avoid
+        # calling them here. The template accesses director/main_actor via
+        # `.name`, so those stay as Person objects; other roles are strings.
+        crew_by_role = {}
+        for crew in movie.crew.select_related('person'):
+            crew_by_role.setdefault(crew.role, []).append(crew.person)
+
+        def names(role):
+            return ", ".join(person.name for person in crew_by_role.get(role, []))
+
+        directors   = crew_by_role.get('Director', [])
+        main_actors = crew_by_role.get('Main Actor', [])
+
         context['det'] = {
             'id':            movie.tmdb_id,
             'name':          movie.title,
             'release_date':  movie.release_date,
-            'director':      director.person if director else None  ,
-            'main_actor':    main_actor.person if main_actor else None,
-            'main_actress':  movie.main_actress,
-            'music_director': movie.music_director,
-            'villain':       movie.villain,
-            'comedian':      movie.comedian,
-            'actor':         movie.main_actor or 'Various',
+            'director':      directors[0] if directors else None,
+            'main_actor':    main_actors[0] if main_actors else None,
+            'main_actress':  names('Main Actress'),
+            'music_director': names('Music Director'),
+            'villain':       names('Villain'),
+            'comedian':      names('Comedian'),
+            'actor':         names('Main Actor') or 'Various',
             'rate':          round(movie.vote_average, 1),
-            'tagline':       getattr(movie, 'tagline', ''),
+            'tagline':       movie.tagline,
             'description':   movie.overview,
-            'watch_trailer': getattr(movie, 'trailer_url', ''),
+            'watch_trailer': movie.trailer_url,
             'img':           {'url': movie.poster_url},
             'backdrop':      movie.backdrop_url,
         }
