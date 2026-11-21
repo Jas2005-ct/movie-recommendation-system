@@ -1,7 +1,8 @@
 """
 Django settings for movies project.
 Local PostgreSQL is always used (set DATABASE_URL in .env).
-DRF and CORS have been removed — this is a template-only Django app.
+User-facing pages are rendered from templates; Django REST Framework is
+registered so the serializers module remains available.
 """
 
 from pathlib import Path
