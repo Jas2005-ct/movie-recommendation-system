@@ -24,6 +24,8 @@ def tmdb_get(path, params=None, max_retries=3):
                         wait = float(retry_after) if retry_after else 2 ** attempt
                     except ValueError:
                         wait = 2 ** attempt
+                    # Never block a sync command for hours on a bad header.
+                    wait = min(wait, 60)
                     logger.warning(
                         "TMDB returned %s for %s; retrying in %ss",
                         resp.status_code, path, wait,
