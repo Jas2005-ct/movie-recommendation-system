@@ -132,7 +132,7 @@ class Movie(models.Model):
 
     @property
     def year(self):
-        return self.release_date.year if self.release_date else ''
+        return self.release_date.year if self.release_date else None
 
     def _get_crew_names(self, role):
         return ", ".join(self.crew.filter(role=role).values_list('person__name', flat=True))
