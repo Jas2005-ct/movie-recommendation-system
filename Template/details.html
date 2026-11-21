@@ -162,7 +162,7 @@
         const tmdbId = {{ det.id|default:"null" }};
         if (!tmdbId) return;
         const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
-        fetch('/api/watch-history/', {
+        fetch('{% url "add_watch_history" %}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -185,7 +185,7 @@
         btn.disabled = true;
         btn.textContent = 'Publishing...';
 
-        fetch('/api/reviews/', {
+        fetch('{% url "add_review" %}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
