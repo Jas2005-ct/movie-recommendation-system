@@ -14,7 +14,7 @@ CineMatch features a deep database of Bollywood, South Indian, and International
 - **Genre Taxonomy**: Full support for movie and TV show genres with distinct landing pages for each.
 
 ### 🎭 User Experience
-- **AI-Powered Discovery**: Integrated facial recognition and emotion detection (using MTCNN and RetinaFace) to suggest movies based on the user's current mood.
+- **Emotion-Aware Discovery**: Moods can be logged through a small JSON API and mapped to genre-based recommendations. Webcam/facial emotion detection is not part of this build.
 - **Dynamic Categorization**: Dedicated sections for Bollywood hits, South Indian blockbusters, and Top Rated global cinema.
 - **Intelligent Search**: Real-time search functionality covering movie titles and cast/crew names.
 - **Sentiment-Aware Reviews**: User rating and review system that automatically calculates review sentiment (Positive/Negative/Neutral) using Natural Language Processing (NLP) via `TextBlob`.
@@ -27,11 +27,8 @@ CineMatch features a deep database of Bollywood, South Indian, and International
 - **Backend**: Python 3.12+, Django 6.0
 - **Package Manager**: [uv](https://docs.astral.sh/uv/) — dependencies declared in `pyproject.toml` and resolved in the committed `uv.lock`
 - **Database**: PostgreSQL (with Full-Text Search integration)
-- **AI & Computer Vision**: 
-  - **TensorFlow & Keras**: Deep learning engine.
-  - **MTCNN & RetinaFace**: High-accuracy face detection.
-  - **OpenCV**: Real-time image processing.
 - **Natural Language Processing**: TextBlob (Sentiment Analysis).
+- **Note**: Heavy CV/ML packages (TensorFlow, OpenCV, MTCNN, RetinaFace) are not used by this application and are intentionally not installed.
 - **External API**: TMDB (v3)
 - **Storage & Media**: Cloudinary (Media hosting) & WhiteNoise (Static files)
 - **Frontend**: HTML5, Vanilla CSS3 (Custom Design System), JavaScript
@@ -100,6 +97,11 @@ CineMatch features a deep database of Bollywood, South Indian, and International
    ```
    Open [http://127.0.0.1:8000](http://127.0.0.1:8000) in your browser.
 
+8. **Run Tests:**
+   ```bash
+   uv run python manage.py test
+   ```
+
 ---
 
 ## 📁 Project Structure
@@ -108,13 +110,15 @@ CineMatch features a deep database of Bollywood, South Indian, and International
 movie_recommondation/
 ├── movie/               # Core application logic
 │   ├── management/      # Custom sync commands (sync_movies, sync_artists)
+│   ├── services/        # TMDB client + recommendation engine
 │   ├── templatetags/    # Custom template filters
 │   ├── models.py        # Database schema for Movies, Persons, Reviews, etc.
 │   ├── views.py         # Template-based discovery and search views
-│   └── urls.py          # App-specific routing
+│   ├── urls.py          # App-specific routing
+│   └── tests.py         # Regression tests
 ├── movies/              # Main project configuration (settings, asgi, wsgi)
 ├── static/              # CSS, JS, and global assets
-├── template/            # HTML templates
+├── Template/            # HTML templates
 ├── pyproject.toml       # Project metadata and pinned dependencies
 ├── uv.lock              # Reproducible dependency resolution (commit this)
 ├── .env.example         # Environment template

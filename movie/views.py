@@ -3,11 +3,14 @@ views.py — Template-only views. Zero live TMDB API calls.
 All data comes from local PostgreSQL via Django ORM.
 Context variables are serialized to dicts matching the existing template format.
 """
+import logging
+
 from movie.models import MovieCrew
 from django.views.generic import TemplateView
-from django.db import models
+from django.db import models, connection
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
+from django.http import JsonResponse, Http404
 from django.views import View
 from textblob import TextBlob
 import json
@@ -16,7 +19,9 @@ from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
 from django.db import models
 from django.db.models import Prefetch
 
-from .models import Movie, Genre, MovieGenre, Review
+from .models import Movie, Genre, MovieGenre, Review, WatchHistory, EmotionLog
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -115,27 +120,39 @@ class MovieDetailHTMLView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
-        movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-        # Fetch refined crew details for the template
-        # Passing person objects for director and main_actor as template uses .name
-        # Using model properties for other roles as they are returned as comma-separated strings
-        director = movie.crew.filter(role='Director').select_related('person').first()
-        main_actor = movie.crew.filter(role='Main Actor').select_related('person').first()
+        movie   = get_object_or_404(
+            Movie.objects.prefetch_related('genres'), tmdb_id=tmdb_id
+        )
+
+        # Load the whole crew in a single query and group it by role. The
+        # Movie model helper properties issue one query per role, so avoid
+        # calling them here. The template accesses director/main_actor via
+        # `.name`, so those stay as Person objects; other roles are strings.
+        crew_by_role = {}
+        for crew in movie.crew.select_related('person'):
+            crew_by_role.setdefault(crew.role, []).append(crew.person)
+
+        def names(role):
+            return ", ".join(person.name for person in crew_by_role.get(role, []))
+
+        directors   = crew_by_role.get('Director', [])
+        main_actors = crew_by_role.get('Main Actor', [])
+
         context['det'] = {
             'id':            movie.tmdb_id,
             'name':          movie.title,
             'release_date':  movie.release_date,
-            'director':      director.person if director else None  ,
-            'main_actor':    main_actor.person if main_actor else None,
-            'main_actress':  movie.main_actress,
-            'music_director': movie.music_director,
-            'villain':       movie.villain,
-            'comedian':      movie.comedian,
-            'actor':         movie.main_actor or 'Various',
+            'director':      directors[0] if directors else None,
+            'main_actor':    main_actors[0] if main_actors else None,
+            'main_actress':  names('Main Actress'),
+            'music_director': names('Music Director'),
+            'villain':       names('Villain'),
+            'comedian':      names('Comedian'),
+            'actor':         names('Main Actor') or 'Various',
             'rate':          round(movie.vote_average, 1),
-            'tagline':       getattr(movie, 'tagline', ''),
+            'tagline':       movie.tagline,
             'description':   movie.overview,
-            'watch_trailer': getattr(movie, 'trailer_url', ''),
+            'watch_trailer': movie.trailer_url,
             'img':           {'url': movie.poster_url},
             'backdrop':      movie.backdrop_url,
         }
@@ -144,11 +161,14 @@ class MovieDetailHTMLView(TemplateView):
             for g in movie.genres.all()
         ]
         
-        # Add reviews to context
+        # Force evaluation inside the try so database errors are caught here;
+        # a lazy queryset would only fail later during template rendering.
         try:
-            context['reviews'] = movie.reviews.all().order_by('-created_at')
-        except Exception as e:
-            print(f"Error fetching reviews for {movie.tmdb_id}: {e}")
+            reviews = movie.reviews.all().order_by('-created_at')
+            len(reviews)
+            context['reviews'] = reviews
+        except Exception:
+            logger.exception("Could not load reviews for movie %s", movie.tmdb_id)
             context['reviews'] = []
         
         return context
@@ -169,6 +189,32 @@ class ReviewCreateView(View):
             tmdb_id     = data.get('tmdb_id')
             rating      = data.get('rating')
             review_text = data.get('review_text', '')
+
+            if not isinstance(review_text, str):
+                return JsonResponse(
+                    {'error': 'Review text must be a string.'}, status=400
+                )
+            review_text = review_text.strip()
+            if len(review_text) > 5000:
+                return JsonResponse(
+                    {'error': 'Review text must be 5000 characters or fewer.'},
+                    status=400,
+                )
+
+            # Django model field validators are not run by Model.objects.create(),
+            # so validate the rating explicitly before writing to the database.
+            try:
+                rating = int(rating)
+            except (TypeError, ValueError):
+                return JsonResponse(
+                    {'error': 'Rating must be an integer between 1 and 5.'},
+                    status=400,
+                )
+            if not 1 <= rating <= 5:
+                return JsonResponse(
+                    {'error': 'Rating must be between 1 and 5.'},
+                    status=400,
+                )
 
             movie = get_object_or_404(Movie, tmdb_id=tmdb_id)
 
@@ -191,8 +237,16 @@ class ReviewCreateView(View):
                 'status': 'success',
                 'message': 'Review published successfully!'
             })
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=400)
+        except Http404:
+            return JsonResponse({'error': 'Movie not found.'}, status=404)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+        except Exception:
+            # Do not expose internal exception details to API clients.
+            return JsonResponse(
+                {'error': 'Could not save review. Please try again.'},
+                status=400,
+            )
 
 
 # =============================================================================
@@ -290,30 +344,40 @@ class TVShowDetailView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
-        movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-        if movie.poster_url:
-            context['det'] = {
-                'id':            movie.tmdb_id,
-                'name':          movie.title,
-                'release_date':  movie.release_date,
-                'director':      movie.director,
-                'music_director': movie.music_director,
-                'main_actor':    movie.main_actor,
-                'main_actress':  movie.main_actress,
-                'villain':       movie.villain,
-                'comedian':      movie.comedian,
-                'actor':         movie.cast,
-                'rate':          round(movie.vote_average, 1),
-                'tagline':       movie.tagline,
-                'description':   movie.overview,
-                'watch_trailer': movie.trailer_url,
-                'img':           {'url': movie.poster_url},
-                'backdrop':      movie.backdrop_url,
-            }
-            context['genres'] = [
-                {'genre': g.name, 'id': g.id}
-                for g in movie.genres.all()
-            ]
+        movie = get_object_or_404(
+            Movie.objects.prefetch_related('genres'), tmdb_id=tmdb_id
+        )
+        # Group the crew in a single query instead of calling the Movie helper
+        # properties, each of which issues its own query per role.
+        crew_by_role = {}
+        for crew in movie.crew.select_related('person'):
+            crew_by_role.setdefault(crew.role, []).append(crew.person)
+
+        def names(role):
+            return ", ".join(person.name for person in crew_by_role.get(role, []))
+
+        context['det'] = {
+            'id':            movie.tmdb_id,
+            'name':          movie.title,
+            'release_date':  movie.release_date,
+            'director':      names('Director'),
+            'music_director': names('Music Director'),
+            'main_actor':    names('Main Actor'),
+            'main_actress':  names('Main Actress'),
+            'villain':       names('Villain'),
+            'comedian':      names('Comedian'),
+            'actor':         names('Main Actor') or 'Various',
+            'rate':          round(movie.vote_average, 1),
+            'tagline':       movie.tagline,
+            'description':   movie.overview,
+            'watch_trailer': movie.trailer_url,
+            'img':           {'url': movie.poster_url},
+            'backdrop':      movie.backdrop_url,
+        }
+        context['genres'] = [
+            {'genre': g.name, 'id': g.tmdb_id}
+            for g in movie.genres.all()
+        ]
         return context
 
 # =============================================================================
@@ -391,17 +455,29 @@ class MovieSearchView(TemplateView):
         query = self.request.GET.get('query', '').strip()
         
         if query:
-            # Use PostgreSQL Full-Text Search with weighting and ranking
-            # Title (A) is weighted highest, then Overview (B)
-            vector = SearchVector('title', weight='A') + \
-                     SearchVector('overview', weight='B')
-            
-            search_query = SearchQuery(query)
-            
-            # Filter and rank results
-            qs = Movie.objects.annotate(
-                rank=SearchRank(vector, search_query)
-            ).filter(rank__gte=0.1, adult=False).order_by('-rank', '-popularity')
+            use_fts = connection.vendor == 'postgresql'
+            if use_fts:
+                # PostgreSQL Full-Text Search: title (A) weighted above overview (B).
+                vector = SearchVector('title', weight='A') + \
+                         SearchVector('overview', weight='B')
+                try:
+                    search_query = SearchQuery(query)
+                except ValidationError:
+                    # The user entered characters the TS query parser rejects.
+                    use_fts = False
+
+            if use_fts:
+                qs = Movie.objects.annotate(
+                    rank=SearchRank(vector, search_query)
+                ).filter(rank__gte=0.1, adult=False).order_by('-rank', '-popularity')
+            else:
+                # Fallback for SQLite (where FTS helpers are unsupported) and
+                # for malformed search queries that PostgreSQL cannot parse.
+                qs = Movie.objects.filter(
+                    models.Q(title__icontains=query) |
+                    models.Q(overview__icontains=query),
+                    adult=False,
+                ).order_by('-popularity', '-vote_average')
         else:
             qs = Movie.objects.none()
 
@@ -452,3 +528,51 @@ class SearchResultsAjaxView(View):
 
 class EmotionCaptureHTMLView(TemplateView):
     template_name = 'emotion_cap.html'
+
+
+# =============================================================================
+#  USER INTERACTION APIs
+# =============================================================================
+
+class WatchHistoryCreateView(View):
+    """Record that a movie was opened (used by future recommendations)."""
+
+    def post(self, request, *args, **kwargs):
+        try:
+            if not request.user.is_authenticated:
+                # Without a user (or session key) all anonymous visitors would
+                # collapse into a single shared history row per movie.
+                return JsonResponse({'status': 'skipped', 'reason': 'anonymous'})
+
+            data = json.loads(request.body)
+            movie = get_object_or_404(Movie, tmdb_id=data.get('tmdb_id'))
+            WatchHistory.objects.get_or_create(
+                user=request.user,
+                movie=movie,
+            )
+            return JsonResponse({'status': 'success'})
+        except Http404:
+            return JsonResponse({'error': 'Movie not found.'}, status=404)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+
+
+class EmotionLogCreateView(View):
+    """Log a detected/selected emotion for mood-based recommendations."""
+
+    def post(self, request, *args, **kwargs):
+        try:
+            data = json.loads(request.body)
+            emotion = str(data.get('emotion', '')).strip().lower()
+            valid = {choice[0] for choice in EmotionLog.EMOTION_CHOICES}
+            if emotion not in valid:
+                return JsonResponse(
+                    {'error': 'Invalid emotion value.'}, status=400
+                )
+            EmotionLog.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                emotion=emotion,
+            )
+            return JsonResponse({'status': 'success', 'emotion': emotion})
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)

@@ -13,31 +13,16 @@ Usage:
 """
 
 import time
-import requests
-from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction, models, connection
 from movie.models import Movie, Genre, MovieGenre, Person, MovieCrew
+from movie.services.tmdb_client import tmdb_get
 
 
-TMDB_BASE = "https://api.themoviedb.org/3"
 SLEEP_BETWEEN_REQUESTS = 0.25   # seconds — stays well within TMDB's 50 req/s limit
 
 # Fields missing in DB
 MISSING_MOVIE_FIELDS = ['director', 'cast']
-
-
-def tmdb_get(path, params=None):
-    """Simple TMDB GET helper. Returns parsed JSON or None on error."""
-    if params is None:
-        params = {}
-    params['api_key'] = settings.TMDB_API_KEY
-    try:
-        resp = requests.get(f"{TMDB_BASE}{path}", params=params, timeout=12)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        return None
 
 
 class Command(BaseCommand):
@@ -273,11 +258,25 @@ class Command(BaseCommand):
                         role=role
                     )
 
-            # 2. Cast (Top 4 actors mapped to specific roles for simplicity)
+            # 2. Cast — assign the lead roles using TMDB gender (1 = female,
+            #    2 = male) instead of blindly labelling the 2nd/3rd/4th billed
+            #    cast members as "Main Actress", "Villain" and "Comedian".
+            #    Only genuine lead roles are stored; unknown/invented roles
+            #    would produce factually incorrect crew data.
             cast_list = credits.get('cast', [])
-            role_map = ['Main Actor', 'Main Actress', 'Villain', 'Comedian']
-            for i, c in enumerate(cast_list[:4]):
-                role = role_map[i]
+            has_actor = has_actress = False
+            for c in cast_list:
+                if has_actor and has_actress:
+                    break
+                gender = c.get('gender', 0)
+                if gender == 1 and not has_actress:
+                    role, has_actress = 'Main Actress', True
+                elif gender in (0, 2) and not has_actor:
+                    # TMDB uses 0 for unknown gender; default to Main Actor.
+                    role, has_actor = 'Main Actor', True
+                else:
+                    continue
+
                 p_obj, _ = Person.objects.update_or_create(
                     tmdb_id=c['id'],
                     defaults={'name': c.get('name', 'Unknown')}

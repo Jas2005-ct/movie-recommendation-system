@@ -1,26 +1,45 @@
 """
 Django settings for movies project.
 Local PostgreSQL is always used (set DATABASE_URL in .env).
-DRF and CORS have been removed — this is a template-only Django app.
+User-facing pages are rendered from templates; Django REST Framework is
+registered so the serializers module remains available.
 """
 
 from pathlib import Path
 import os
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-change-this-in-production')
-DEBUG      = os.environ.get('DEBUG', 'True') == 'True'
+SECRET_KEY = os.environ.get('SECRET_KEY', '')
+DEBUG      = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
+
+if not DEBUG and not SECRET_KEY:
+    raise ImproperlyConfigured(
+        'SECRET_KEY must be set in the environment when DEBUG is False.'
+    )
 
 # TMDB key — only used by management command, never during a user request
 TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
 
-ALLOWED_HOSTS = [host.strip().replace('https://', '').replace('http://', '') for host in os.environ.get('ALLOWED_HOSTS', '*').split(',') if host.strip()]
+ALLOWED_HOSTS = [
+    host.strip().replace('https://', '').replace('http://', '')
+    for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    if host.strip()
+]
+
+if not DEBUG and '*' in ALLOWED_HOSTS:
+    raise ImproperlyConfigured(
+        'ALLOWED_HOSTS must not contain "*" when DEBUG is False.'
+    )
 
 # CSRF Trusted Origins (required for Django 4.0+ with custom domains)
-CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host and host != '*' and '.' in host]
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{host}" for host in ALLOWED_HOSTS
+    if host and host != '*' and '.' in host
+]
 
 # =============================================================================
 # Application definition
@@ -34,6 +53,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.postgres',
+    'rest_framework',
 
     # Cloudinary (for media storage if deploying)
     'cloudinary_storage',
@@ -146,7 +166,13 @@ STORAGES = {
         "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage" if os.environ.get('CLOUDINARY_URL') else "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        # Manifest storage requires `collectstatic` to have run. Use the plain
+        # storage in DEBUG/tests so templates render without a manifest.
+        "BACKEND": (
+            "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            if not DEBUG
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        ),
     },
 }
 

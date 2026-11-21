@@ -109,6 +109,7 @@ class Movie(models.Model):
         indexes   = [
             models.Index(fields=['content_type', 'language']),
             models.Index(fields=['content_type', 'popularity']),
+            models.Index(fields=['release_date']),
         ]
 
     def __str__(self):
@@ -131,7 +132,7 @@ class Movie(models.Model):
 
     @property
     def year(self):
-        return self.release_date.year if self.release_date else ''
+        return self.release_date.year if self.release_date else None
 
     def _get_crew_names(self, role):
         return ", ".join(self.crew.filter(role=role).values_list('person__name', flat=True))
@@ -163,7 +164,6 @@ class Movie(models.Model):
     @property
     def cast(self):
         # Concatenate main actor, actress, villain, comedian for a simple cast string
-        from itertools import filterfalse
         roles = filter(None, [self.main_actor, self.main_actress, self.villain, self.comedian])
         return ", ".join(roles)
 
@@ -261,6 +261,9 @@ class Review(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['movie', '-created_at']),
+        ]
 
     def __str__(self):
         return f"Review {self.rating}★ — {self.movie.title}"
@@ -277,6 +280,12 @@ class WatchHistory(models.Model):
 
     class Meta:
         ordering = ['-watched_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'movie'],
+                name='unique_watch_history_per_user_movie',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user} watched {self.movie.title}"
