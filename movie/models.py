@@ -109,6 +109,7 @@ class Movie(models.Model):
         indexes   = [
             models.Index(fields=['content_type', 'language']),
             models.Index(fields=['content_type', 'popularity']),
+            models.Index(fields=['release_date']),
         ]
 
     def __str__(self):
@@ -261,6 +262,9 @@ class Review(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['movie', '-created_at']),
+        ]
 
     def __str__(self):
         return f"Review {self.rating}★ — {self.movie.title}"
