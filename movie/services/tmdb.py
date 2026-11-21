@@ -1,3 +1,4 @@
+import hashlib
 from urllib.parse import quote
 
 import requests
@@ -70,7 +71,8 @@ class TMDBService:
             f"{cls.BASE_URL}/search/movie{cls._get_api_key_param()}"
             f"&query={quote(query)}&include_adult=false&language=en-US&page={page}"
         )
-        cache_key = f"tmdb_search_{query.replace(' ', '_')}_{page}"
+        query_hash = hashlib.sha256(query.encode('utf-8')).hexdigest()
+        cache_key = f"tmdb_search_{query_hash}_{page}"
         return cls._fetch_data(url, cache_key, 3600)
         
     @classmethod
