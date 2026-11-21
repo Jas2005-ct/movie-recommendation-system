@@ -335,7 +335,7 @@ class TVShowDetailView(TemplateView):
                 'backdrop':      movie.backdrop_url,
             }
             context['genres'] = [
-                {'genre': g.name, 'id': g.id}
+                {'genre': g.name, 'id': g.tmdb_id}
                 for g in movie.genres.all()
             ]
         return context
