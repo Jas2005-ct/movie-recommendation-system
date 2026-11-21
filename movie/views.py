@@ -3,6 +3,8 @@ views.py — Template-only views. Zero live TMDB API calls.
 All data comes from local PostgreSQL via Django ORM.
 Context variables are serialized to dicts matching the existing template format.
 """
+import logging
+
 from movie.models import MovieCrew
 from django.views.generic import TemplateView
 from django.db import models, connection
@@ -18,6 +20,8 @@ from django.db import models
 from django.db.models import Prefetch
 
 from .models import Movie, Genre, MovieGenre, Review, WatchHistory, EmotionLog
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +161,14 @@ class MovieDetailHTMLView(TemplateView):
             for g in movie.genres.all()
         ]
         
-        # Add reviews to context
+        # Force evaluation inside the try so database errors are caught here;
+        # a lazy queryset would only fail later during template rendering.
         try:
-            context['reviews'] = movie.reviews.all().order_by('-created_at')
-        except Exception as e:
-            print(f"Error fetching reviews for {movie.tmdb_id}: {e}")
+            reviews = movie.reviews.all().order_by('-created_at')
+            len(reviews)
+            context['reviews'] = reviews
+        except Exception:
+            logger.exception("Could not load reviews for movie %s", movie.tmdb_id)
             context['reviews'] = []
         
         return context
