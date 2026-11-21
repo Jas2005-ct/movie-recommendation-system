@@ -6,47 +6,55 @@
 <link rel="stylesheet" href="{% static 'styles/index.css' %}">
 {% endblock %}
 
-<main class="container" style="padding-top: var(--sp-2xl);">
-    <div class="section-header">
-        <h2 class="section-heading">Movies for <span>{{ genre_name }}</span></h2>
-        <form class="srt" method="GET" action="">
-            <select name="sort" onchange="this.form.submit()" class="glass-select">
-                <option value="">Sort By</option>
-                <option value="year" {% if request.GET.sort == 'year' %}selected{% endif %}>Release Year</option>
-                <option value="az" {% if request.GET.sort == 'az' %}selected{% endif %}>Highest Rated</option>
-                <option value="popularity" {% if request.GET.sort == 'popularity' %}selected{% endif %}>Most Popular</option>
-            </select>
-        </form>
+<main class="container-fluid px-3 px-md-5 mt-4">
+    <div class="section-header" style="flex-direction: row; align-items: center; border-bottom: 1px solid var(--clr-border-dim); padding-bottom: var(--sp-sm); margin-bottom: var(--sp-md);">
+        <div class="header-left" style="display: flex; flex-direction: column; gap: 4px;">
+            <h2 class="section-heading" style="margin: 0;">Movies for <span>{{ genre_name }}</span></h2>
+            <p class="result-count" style="font-size: 0.85rem; color: var(--clr-text-muted); font-weight: 500;">
+                Showing <span style="color: var(--clr-accent);">{{ movies|length }}</span> of {{ page_obj.paginator.count }} movies
+            </p>
+        </div>
+        
+        <div class="header-right" style="display: flex; align-items: center; gap: var(--sp-md);">
+            <form class="srt" method="GET" action="" style="margin: 0;">
+                <select name="sort" onchange="this.form.submit()" class="glass-select" style="padding: 6px 12px; font-size: 0.9rem; border-color: rgba(232, 184, 75, 0.3);">
+                    <option value="">Sort By</option>
+                    <option value="year" {% if request.GET.sort == 'year' %}selected{% endif %}>Release Year</option>
+                    <option value="az" {% if request.GET.sort == 'az' %}selected{% endif %}>Highest Rated</option>
+                    <option value="popularity" {% if request.GET.sort == 'popularity' %}selected{% endif %}>Most Popular</option>
+                </select>
+            </form>
+        </div>
     </div>
 
-    {% include 'pagination.html' %}
-
-    <div class="movies-grid">
+    <div class="row g-4 mt-2">
         {% for tits in movies %}
-        <div class="movie-card">
-            <a href="{% url 'movie_detail' tmdb_id=tits.id %}" class="poster-link">
-                <div class="poster-wrapper">
-                    {% if tits.poster %}
-                    <img src="{{tits.poster}}" alt="{{tits.name}}" loading="lazy">
-                    {% else %}
-                    <img src="https://via.placeholder.com/500x750?text=No+Poster" alt="No Poster">
-                    {% endif %}
-                    <div class="overlay-glass">
-                        <span class="view-text">View Details</span>
+        <div class="col-6 col-sm-4 col-md-3 col-xl-2">
+            <div class="movie-card h-100">
+                <a href="{% url 'movie_detail' tmdb_id=tits.id %}" class="poster-link">
+                    <div class="poster-wrapper">
+                        {% if tits.poster %}
+                        <img src="{{tits.poster}}" class="img-fluid rounded" alt="{{tits.name}}" loading="lazy" onerror="this.onerror=null; this.src='{% static 'images/icon3.jpg' %}'">
+                        {% else %}
+                        <img src="{% static 'images/icon3.jpg' %}" class="img-fluid rounded" alt="No Poster" onerror="this.onerror=null; this.src='{% static 'images/icon3.jpg' %}'">
+                        {% endif %}
+                        <div class="overlay-glass">
+                            <span class="view-text">View Details</span>
+                        </div>
                     </div>
-                </div>
-            </a>
-            <div class="card-info">
-                <h3>{{tits.name}}</h3>
-                <div class="meta">
-                    <span class="rate">★ {{tits.rate}}</span>
-                    <span class="year">{{tits.year}}</span>
+                </a>
+                <div class="card-info mt-2">
+                    <h3 class="text-truncate" title="{{tits.name}}">{{tits.name}}</h3>
+                    <div class="meta d-flex justify-content-between">
+                        <span class="rate text-warning">★ {{tits.rate}}</span>
+                        <span class="year text-muted">{{tits.year}}</span>
+                    </div>
                 </div>
             </div>
         </div>
         {% empty %}
-        <div style="grid-column: 1 / -1; text-align: center; color: var(--clr-text-muted); padding: var(--sp-2xl) 0;">
-            <p style="font-size: 1.2rem;">No movies found for this genre right now.</p>
+        <div class="col-12 text-center text-muted py-5">
+            <p class="fs-4">No movies found for this genre right now.</p>
         </div>
         {% endfor %}
     </div>

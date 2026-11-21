@@ -3,6 +3,7 @@ views.py — Template-only views. Zero live TMDB API calls.
 All data comes from local PostgreSQL via Django ORM.
 Context variables are serialized to dicts matching the existing template format.
 """
+from movie.models import MovieCrew
 from django.views.generic import TemplateView
 from django.db import models
 from django.shortcuts import get_object_or_404
@@ -11,54 +12,14 @@ from django.views import View
 from textblob import TextBlob
 import json
 from django.core.paginator import Paginator
+from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
 from django.db import models
+from django.db.models import Prefetch
 
 from .models import Movie, Genre, MovieGenre, Review
 
 
 # ---------------------------------------------------------------------------
-# aggressive monkeypatch for schema mismatch
-tmdb_id_field = Genre._meta.get_field('tmdb_id')
-tmdb_id_field.primary_key = False
-tmdb_id_field.unique = True
-
-try:
-    id_field = Genre._meta.get_field('id')
-except:
-    id_field = models.AutoField(primary_key=True, name='id', db_column='id')
-    id_field.contribute_to_class(Genre, 'id')
-
-id_field.primary_key = True
-Genre._meta.pk = id_field
-Genre._meta.db_table = 'genre'
-MovieGenre._meta.db_table = 'movie_genre'
-
-# Update Foreign Keys
-for field in MovieGenre._meta.local_fields:
-    if field.name == 'genre':
-        field.remote_field.field_name = 'id'
-
-for field in Movie._meta.local_many_to_many:
-    if field.name == 'genres':
-        field.remote_field.field_name = 'id'
-
-# Ensure Movie is imported for M2M lookup
-from .models import Movie
-Genre._meta._expire_cache()
-Movie._meta._expire_cache()
-MovieGenre._meta._expire_cache()
-
-# Monkeypatch Movie to remove fields that don't exist in DB
-# Fields known to be missing: director, cast, cache_updated_at
-MISSING_MOVIE_FIELDS = ['director', 'cast', 'cache_updated_at']
-Movie._meta.local_fields = [f for f in Movie._meta.local_fields if f.name not in MISSING_MOVIE_FIELDS]
-for f_name in MISSING_MOVIE_FIELDS:
-    if hasattr(Movie, f_name):
-        delattr(Movie, f_name)
-if hasattr(Movie._meta, '_get_fields_cache'):
-    del Movie._meta._get_fields_cache
-Movie._meta._expire_cache()
-
 # ---------------------------------------------------------------------------
 
 # Helper: convert a Movie queryset to the dict format templates expect
@@ -110,19 +71,19 @@ def _get_paginated_movies(request, qs, per_page: int = 24):
 # =============================================================================
 
 class HomeView(TemplateView):
-    template_name = 'first.html'
+    template_name = 'home_page.html'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
         bollywood_qs = (
             Movie.objects
-            .filter(content_type='movie', language='hi')
+            .filter(content_type='movie', language='hi',adult=False)
             .order_by('-popularity', '-vote_average')[:20]
         )
         south_qs = (
             Movie.objects
-            .filter(content_type='movie', language__in=['ta', 'te', 'ml', 'kn'])
+            .filter(content_type='movie', language__in=['ta', 'te', 'ml', 'kn'],adult=False)
             .order_by('-popularity', '-vote_average')[:20]
         )
 
@@ -155,13 +116,22 @@ class MovieDetailHTMLView(TemplateView):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
         movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-
+        # Fetch refined crew details for the template
+        # Passing person objects for director and main_actor as template uses .name
+        # Using model properties for other roles as they are returned as comma-separated strings
+        director = movie.crew.filter(role='Director').select_related('person').first()
+        main_actor = movie.crew.filter(role='Main Actor').select_related('person').first()
         context['det'] = {
             'id':            movie.tmdb_id,
             'name':          movie.title,
             'release_date':  movie.release_date,
-            'director':      {'director': getattr(movie, 'director', 'Unknown')},
-            'actor':         {'actor': getattr(movie, 'cast', 'Various')},
+            'director':      director.person if director else None  ,
+            'main_actor':    main_actor.person if main_actor else None,
+            'main_actress':  movie.main_actress,
+            'music_director': movie.music_director,
+            'villain':       movie.villain,
+            'comedian':      movie.comedian,
+            'actor':         movie.main_actor or 'Various',
             'rate':          round(movie.vote_average, 1),
             'tagline':       getattr(movie, 'tagline', ''),
             'description':   movie.overview,
@@ -267,7 +237,7 @@ class GenreDetailView(TemplateView):
         
         movies_qs = (
             Movie.objects
-            .filter(genres__id=genre_id, content_type='movie', tmdb_id__isnull=False)
+            .filter(genres__id=genre_id, content_type='movie', tmdb_id__isnull=False, adult=False)
         )
         
         if sort_by == 'year':
@@ -298,7 +268,7 @@ class TVShowHTMLView(TemplateView):
         
         shows_qs = (
             Movie.objects
-            .filter(content_type='tv', tmdb_id__isnull=False)
+            .filter(content_type='tv', tmdb_id__isnull=False,adult=False)
         )
         
         if sort_by == 'year':
@@ -356,10 +326,10 @@ class CategoryHTMLView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['ca'] = [
-            {'category_id': 'bollywood',    'title': 'Bollywood',     'desc': 'Popular Hindi movies'},
-            {'category_id': 'south_indian', 'title': 'South Indian',  'desc': 'Tamil, Telugu, Malayalam & Kannada'},
-            {'category_id': 'top_rated',    'title': 'Top Rated',     'desc': 'Highest rated movies in DB'},
-            {'category_id': 'tv_shows',     'title': 'TV Shows',      'desc': 'Popular Indian web series & shows'},
+            {'category_id': 'bollywood',    'title': 'Bollywood',     'desc': 'Popular Hindi movies', 'poster':'images/category/bollywood.webp'},
+            {'category_id': 'south_indian', 'title': 'South Indian',  'desc': 'Tamil, Telugu, Malayalam & Kannada', 'poster':'images/category/south_indian.webp'},
+            {'category_id': 'top_rated',    'title': 'Top Rated',     'desc': 'Highest rated movies in DB', 'poster':'images/category/top_rated.webp'},
+            {'category_id': 'tv_shows',     'title': 'TV Shows',      'desc': 'Popular Indian web series & shows', 'poster':'images/category/tv_shows.webp'},
         ]
         return context
 
@@ -376,14 +346,14 @@ class MovieListView(TemplateView):
         category = self.kwargs.get('category', 'all')
         sort_by  = self.request.GET.get('sort', 'popularity')
         
-        qs = Movie.objects.filter(content_type='movie', tmdb_id__isnull=False)
+        qs = Movie.objects.filter(content_type='movie', tmdb_id__isnull=False,adult=False)
         
         title = "All Movies"
         if category == 'bollywood':
             qs = qs.filter(language='hi')
             title = "Bollywood Hits"
         elif category == 'south_indian':
-            qs = qs.filter(language__in=['ta', 'te', 'ml', 'kn'])
+            qs = qs.filter(language__in=['ta','ml', 'kn'])
             title = "South Indian Blockbusters"
         elif category == 'top_rated':
             # Skip popularity default if specifically asking for top rated
@@ -421,11 +391,17 @@ class MovieSearchView(TemplateView):
         query = self.request.GET.get('query', '').strip()
         
         if query:
-            from django.db.models import Q
-            qs = Movie.objects.filter(
-                Q(title__icontains=query) | 
-                Q(crew__person__name__icontains=query)
-            ).distinct()
+            # Use PostgreSQL Full-Text Search with weighting and ranking
+            # Title (A) is weighted highest, then Overview (B)
+            vector = SearchVector('title', weight='A') + \
+                     SearchVector('overview', weight='B')
+            
+            search_query = SearchQuery(query)
+            
+            # Filter and rank results
+            qs = Movie.objects.annotate(
+                rank=SearchRank(vector, search_query)
+            ).filter(rank__gte=0.1, adult=False).order_by('-rank', '-popularity')
         else:
             qs = Movie.objects.none()
 
@@ -436,6 +412,38 @@ class MovieSearchView(TemplateView):
         context['query']     = query
         context['count']     = page_obj.paginator.count
         return context
+
+
+class SearchResultsAjaxView(View):
+    """
+    Search suggestions for AJAX autocomplete.
+    Returns a small JSON list of top matches.
+    """
+    def get(self, request, *args, **kwargs):
+        query = request.GET.get('query', '').strip()
+        if not query or len(query) < 2:
+            return JsonResponse({'results': []})
+
+        # Simple but fast search for autocomplete
+        # (FTS might be overkill here, icontains is fine for small top-N suggestion)
+        results = (
+            Movie.objects
+            .filter(title__icontains=query)
+            .order_by('-popularity')[:8]
+        )
+        
+        data = [
+            {
+                'id': m.tmdb_id,
+                'title': m.title,
+                'year': m.release_date.year if m.release_date else '',
+                'poster': m.poster_url,
+                'url': f"/movie/{m.tmdb_id}/"
+            }
+            for m in results
+        ]
+        
+        return JsonResponse({'results': data})
 
 
 # =============================================================================

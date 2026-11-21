@@ -7,7 +7,6 @@ DRF and CORS have been removed — this is a template-only Django app.
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -18,7 +17,10 @@ DEBUG      = os.environ.get('DEBUG', 'True') == 'True'
 # TMDB key — only used by management command, never during a user request
 TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
 
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = [host.strip().replace('https://', '').replace('http://', '') for host in os.environ.get('ALLOWED_HOSTS', '*').split(',') if host.strip()]
+
+# CSRF Trusted Origins (required for Django 4.0+ with custom domains)
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host and host != '*' and '.' in host]
 
 # =============================================================================
 # Application definition
@@ -31,6 +33,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django.contrib.postgres',
 
     # Cloudinary (for media storage if deploying)
     'cloudinary_storage',
@@ -56,7 +59,7 @@ ROOT_URLCONF = 'movies.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'template')],
+        'DIRS': [os.path.join(BASE_DIR, 'Template')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -79,16 +82,14 @@ import dj_database_url
 
 _DATABASE_URL = os.environ.get('DATABASE_URL')
 
-if _DATABASE_URL:
+if _DATABASE_URL and _DATABASE_URL.startswith('postgres'):
     DATABASES = {
-        'default': dj_database_url.config(
-            default=_DATABASE_URL,
-            conn_max_age=600,
-            conn_health_checks=True,
-        )
+        'default': dj_database_url.parse(_DATABASE_URL)
     }
+    DATABASES['default']['CONN_MAX_AGE'] = 600
+    DATABASES['default']['CONN_HEALTH_CHECKS'] = True
 else:
-    # Fallback to SQLite only for quick tests without PG available
+    # Fallback to SQLite only if DATABASE_URL is missing or local
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.sqlite3',
@@ -136,13 +137,18 @@ STATIC_URL      = '/static/'
 STATICFILES_DIRS = [BASE_DIR / 'static']
 STATIC_ROOT     = os.path.join(BASE_DIR, 'assets')
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
-
+# Media & Storage settings for Django 4.2+ (Media on Cloudinary, Static on WhiteNoise)
 MEDIA_URL  = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
-if os.environ.get('CLOUDINARY_URL'):
-    DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage" if os.environ.get('CLOUDINARY_URL') else "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 # =============================================================================
 # Misc
