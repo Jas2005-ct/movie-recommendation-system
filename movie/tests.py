@@ -99,7 +99,11 @@ class DetailViewTests(TestCase):
 
 
 class InteractionApiTests(TestCase):
-    def test_watch_history_is_recorded(self):
+    def test_watch_history_is_recorded_for_logged_in_user(self):
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_user(username='viewer', password='pass12345')
+        self.client.force_login(user)
         movie = Movie.objects.create(tmdb_id=4001, title='Watched Movie')
         response = self.client.post(
             reverse('add_watch_history'),
@@ -108,6 +112,16 @@ class InteractionApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(WatchHistory.objects.count(), 1)
+
+    def test_anonymous_watch_history_is_skipped(self):
+        movie = Movie.objects.create(tmdb_id=4002, title='Anon Watched')
+        response = self.client.post(
+            reverse('add_watch_history'),
+            data=json.dumps({'tmdb_id': movie.tmdb_id}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.json()['status'], 'skipped')
+        self.assertEqual(WatchHistory.objects.count(), 0)
 
     def test_emotion_log_rejects_invalid_emotion(self):
         response = self.client.post(

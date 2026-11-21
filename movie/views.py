@@ -512,10 +512,15 @@ class WatchHistoryCreateView(View):
 
     def post(self, request, *args, **kwargs):
         try:
+            if not request.user.is_authenticated:
+                # Without a user (or session key) all anonymous visitors would
+                # collapse into a single shared history row per movie.
+                return JsonResponse({'status': 'skipped', 'reason': 'anonymous'})
+
             data = json.loads(request.body)
             movie = get_object_or_404(Movie, tmdb_id=data.get('tmdb_id'))
             WatchHistory.objects.get_or_create(
-                user=request.user if request.user.is_authenticated else None,
+                user=request.user,
                 movie=movie,
             )
             return JsonResponse({'status': 'success'})

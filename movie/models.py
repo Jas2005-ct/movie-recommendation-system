@@ -281,6 +281,12 @@ class WatchHistory(models.Model):
 
     class Meta:
         ordering = ['-watched_at']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['user', 'movie'],
+                name='unique_watch_history_per_user_movie',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user} watched {self.movie.title}"
