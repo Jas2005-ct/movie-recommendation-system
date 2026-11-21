@@ -5,7 +5,8 @@ Context variables are serialized to dicts matching the existing template format.
 """
 from movie.models import MovieCrew
 from django.views.generic import TemplateView
-from django.db import models
+from django.db import models, connection
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404
 from django.http import JsonResponse, Http404
 from django.views import View
@@ -414,17 +415,29 @@ class MovieSearchView(TemplateView):
         query = self.request.GET.get('query', '').strip()
         
         if query:
-            # Use PostgreSQL Full-Text Search with weighting and ranking
-            # Title (A) is weighted highest, then Overview (B)
-            vector = SearchVector('title', weight='A') + \
-                     SearchVector('overview', weight='B')
-            
-            search_query = SearchQuery(query)
-            
-            # Filter and rank results
-            qs = Movie.objects.annotate(
-                rank=SearchRank(vector, search_query)
-            ).filter(rank__gte=0.1, adult=False).order_by('-rank', '-popularity')
+            use_fts = connection.vendor == 'postgresql'
+            if use_fts:
+                # PostgreSQL Full-Text Search: title (A) weighted above overview (B).
+                vector = SearchVector('title', weight='A') + \
+                         SearchVector('overview', weight='B')
+                try:
+                    search_query = SearchQuery(query)
+                except ValidationError:
+                    # The user entered characters the TS query parser rejects.
+                    use_fts = False
+
+            if use_fts:
+                qs = Movie.objects.annotate(
+                    rank=SearchRank(vector, search_query)
+                ).filter(rank__gte=0.1, adult=False).order_by('-rank', '-popularity')
+            else:
+                # Fallback for SQLite (where FTS helpers are unsupported) and
+                # for malformed search queries that PostgreSQL cannot parse.
+                qs = Movie.objects.filter(
+                    models.Q(title__icontains=query) |
+                    models.Q(overview__icontains=query),
+                    adult=False,
+                ).order_by('-popularity', '-vote_average')
         else:
             qs = Movie.objects.none()
 
