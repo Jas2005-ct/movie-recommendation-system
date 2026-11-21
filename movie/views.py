@@ -327,29 +327,30 @@ class TVShowDetailView(TemplateView):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
         movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-        if movie.poster_url:
-            context['det'] = {
-                'id':            movie.tmdb_id,
-                'name':          movie.title,
-                'release_date':  movie.release_date,
-                'director':      movie.director,
-                'music_director': movie.music_director,
-                'main_actor':    movie.main_actor,
-                'main_actress':  movie.main_actress,
-                'villain':       movie.villain,
-                'comedian':      movie.comedian,
-                'actor':         movie.cast,
-                'rate':          round(movie.vote_average, 1),
-                'tagline':       movie.tagline,
-                'description':   movie.overview,
-                'watch_trailer': movie.trailer_url,
-                'img':           {'url': movie.poster_url},
-                'backdrop':      movie.backdrop_url,
-            }
-            context['genres'] = [
-                {'genre': g.name, 'id': g.tmdb_id}
-                for g in movie.genres.all()
-            ]
+        # Always provide context — the template has a poster fallback, so a
+        # missing poster must not make the whole detail page disappear.
+        context['det'] = {
+            'id':            movie.tmdb_id,
+            'name':          movie.title,
+            'release_date':  movie.release_date,
+            'director':      movie.director,
+            'music_director': movie.music_director,
+            'main_actor':    movie.main_actor,
+            'main_actress':  movie.main_actress,
+            'villain':       movie.villain,
+            'comedian':      movie.comedian,
+            'actor':         movie.cast,
+            'rate':          round(movie.vote_average, 1),
+            'tagline':       movie.tagline,
+            'description':   movie.overview,
+            'watch_trailer': movie.trailer_url,
+            'img':           {'url': movie.poster_url},
+            'backdrop':      movie.backdrop_url,
+        }
+        context['genres'] = [
+            {'genre': g.name, 'id': g.tmdb_id}
+            for g in movie.genres.all()
+        ]
         return context
 
 # =============================================================================
