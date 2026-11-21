@@ -326,20 +326,29 @@ class TVShowDetailView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         tmdb_id = self.kwargs.get('tmdb_id')
-        movie   = get_object_or_404(Movie, tmdb_id=tmdb_id)
-        # Always provide context — the template has a poster fallback, so a
-        # missing poster must not make the whole detail page disappear.
+        movie = get_object_or_404(
+            Movie.objects.prefetch_related('genres'), tmdb_id=tmdb_id
+        )
+        # Group the crew in a single query instead of calling the Movie helper
+        # properties, each of which issues its own query per role.
+        crew_by_role = {}
+        for crew in movie.crew.select_related('person'):
+            crew_by_role.setdefault(crew.role, []).append(crew.person)
+
+        def names(role):
+            return ", ".join(person.name for person in crew_by_role.get(role, []))
+
         context['det'] = {
             'id':            movie.tmdb_id,
             'name':          movie.title,
             'release_date':  movie.release_date,
-            'director':      movie.director,
-            'music_director': movie.music_director,
-            'main_actor':    movie.main_actor,
-            'main_actress':  movie.main_actress,
-            'villain':       movie.villain,
-            'comedian':      movie.comedian,
-            'actor':         movie.cast,
+            'director':      names('Director'),
+            'music_director': names('Music Director'),
+            'main_actor':    names('Main Actor'),
+            'main_actress':  names('Main Actress'),
+            'villain':       names('Villain'),
+            'comedian':      names('Comedian'),
+            'actor':         names('Main Actor') or 'Various',
             'rate':          round(movie.vote_average, 1),
             'tagline':       movie.tagline,
             'description':   movie.overview,
