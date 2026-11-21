@@ -7,7 +7,7 @@ from movie.models import MovieCrew
 from django.views.generic import TemplateView
 from django.db import models
 from django.shortcuts import get_object_or_404
-from django.http import JsonResponse
+from django.http import JsonResponse, Http404
 from django.views import View
 from textblob import TextBlob
 import json
@@ -206,8 +206,16 @@ class ReviewCreateView(View):
                 'status': 'success',
                 'message': 'Review published successfully!'
             })
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=400)
+        except Http404:
+            return JsonResponse({'error': 'Movie not found.'}, status=404)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+        except Exception:
+            # Do not expose internal exception details to API clients.
+            return JsonResponse(
+                {'error': 'Could not save review. Please try again.'},
+                status=400,
+            )
 
 
 # =============================================================================
