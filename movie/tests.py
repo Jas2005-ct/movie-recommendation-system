@@ -1,5 +1,7 @@
 import json
+from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
@@ -54,6 +56,15 @@ class ReviewApiTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Review.objects.count(), 0)
 
+    def test_review_text_must_be_a_string(self):
+        response = self._post({
+            'tmdb_id': self.movie.tmdb_id,
+            'rating': 5,
+            'review_text': 12345,
+        })
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(Review.objects.count(), 0)
+
     def test_unknown_movie_returns_404(self):
         response = self._post({
             'tmdb_id': 999999,
@@ -77,6 +88,17 @@ class SearchTests(TestCase):
 
     def test_normal_search_returns_matches(self):
         response = self.client.get(reverse('search_results'), {'query': 'Adventure'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'The Great Adventure')
+
+    def test_postgres_parser_error_falls_back_to_icontains(self):
+        # Simulate the PostgreSQL path and a query the TS parser rejects.
+        with patch('movie.views.connection') as mock_connection:
+            mock_connection.vendor = 'postgresql'
+            with patch('movie.views.SearchQuery', side_effect=ValidationError('bad')):
+                response = self.client.get(
+                    reverse('search_results'), {'query': 'Adventure'}
+                )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'The Great Adventure')
 
