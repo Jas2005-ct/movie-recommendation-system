@@ -164,7 +164,6 @@ class Movie(models.Model):
     @property
     def cast(self):
         # Concatenate main actor, actress, villain, comedian for a simple cast string
-        from itertools import filterfalse
         roles = filter(None, [self.main_actor, self.main_actress, self.villain, self.comedian])
         return ", ".join(roles)
 
