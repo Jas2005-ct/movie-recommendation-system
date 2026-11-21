@@ -10,8 +10,6 @@ db.sqlite3
 media
 .env
 .pytest_cache
-requirements.txt.bak
-tmp_req.txt
 *.log
 .DS_Store
 node_modules

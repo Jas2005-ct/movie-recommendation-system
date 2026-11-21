@@ -1,9 +1,15 @@
 # Use an official Python runtime as a parent image
 FROM python:3.12-slim
 
+# Install uv for reproducible, lockfile-based dependency installs
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /bin/
+
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH" \
+    UV_LINK_MODE=copy
 
 # Set work directory
 WORKDIR /app
@@ -15,9 +21,9 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies from the uv lockfile (cached separately from source)
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-install-project
 
 # Copy project files
 COPY . /app/

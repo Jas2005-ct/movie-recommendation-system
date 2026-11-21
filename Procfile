@@ -1,1 +1,1 @@
-web: gunicorn movies.wsgi --log-file -
+web: uv run gunicorn movies.wsgi --log-file -
