@@ -16,4 +16,6 @@ urlpatterns = [
     path('search/',                   views.MovieSearchView.as_view(),      name='search_results'),
     path('api/search-suggestions/',   views.SearchResultsAjaxView.as_view(), name='search_suggestions'),
     path('api/reviews/',              views.ReviewCreateView.as_view(),     name='add_review'),
+    path('api/watch-history/',        views.WatchHistoryCreateView.as_view(), name='add_watch_history'),
+    path('api/emotion-log/',          views.EmotionLogCreateView.as_view(),  name='add_emotion_log'),
 ]

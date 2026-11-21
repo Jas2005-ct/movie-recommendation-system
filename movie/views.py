@@ -17,7 +17,7 @@ from django.contrib.postgres.search import SearchVector, SearchQuery, SearchRank
 from django.db import models
 from django.db.models import Prefetch
 
-from .models import Movie, Genre, MovieGenre, Review
+from .models import Movie, Genre, MovieGenre, Review, WatchHistory, EmotionLog
 
 
 # ---------------------------------------------------------------------------
@@ -500,3 +500,46 @@ class SearchResultsAjaxView(View):
 
 class EmotionCaptureHTMLView(TemplateView):
     template_name = 'emotion_cap.html'
+
+
+# =============================================================================
+#  USER INTERACTION APIs
+# =============================================================================
+
+class WatchHistoryCreateView(View):
+    """Record that a movie was opened (used by future recommendations)."""
+
+    def post(self, request, *args, **kwargs):
+        try:
+            data = json.loads(request.body)
+            movie = get_object_or_404(Movie, tmdb_id=data.get('tmdb_id'))
+            WatchHistory.objects.get_or_create(
+                user=request.user if request.user.is_authenticated else None,
+                movie=movie,
+            )
+            return JsonResponse({'status': 'success'})
+        except Http404:
+            return JsonResponse({'error': 'Movie not found.'}, status=404)
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)
+
+
+class EmotionLogCreateView(View):
+    """Log a detected/selected emotion for mood-based recommendations."""
+
+    def post(self, request, *args, **kwargs):
+        try:
+            data = json.loads(request.body)
+            emotion = str(data.get('emotion', '')).strip().lower()
+            valid = {choice[0] for choice in EmotionLog.EMOTION_CHOICES}
+            if emotion not in valid:
+                return JsonResponse(
+                    {'error': 'Invalid emotion value.'}, status=400
+                )
+            EmotionLog.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                emotion=emotion,
+            )
+            return JsonResponse({'status': 'success', 'emotion': emotion})
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON payload.'}, status=400)

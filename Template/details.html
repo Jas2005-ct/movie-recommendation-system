@@ -157,6 +157,21 @@
 </main>
 
 <script>
+    // Track that this movie was opened, for future recommendations.
+    (function recordWatchHistory() {
+        const tmdbId = {{ det.id|default:"null" }};
+        if (!tmdbId) return;
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]')?.value;
+        fetch('/api/watch-history/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': csrfToken || ''
+            },
+            body: JSON.stringify({ tmdb_id: tmdbId })
+        }).catch(err => console.error('Could not record watch history:', err));
+    })();
+
     function submitReview() {
         const tmdbId = {{ det.id|default:"null" }};
         const rating = document.querySelector('input[name="rating"]:checked')?.value;
