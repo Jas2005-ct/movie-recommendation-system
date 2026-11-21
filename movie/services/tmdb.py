@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import requests
 from django.conf import settings
 from django.core.cache import cache
@@ -6,18 +8,12 @@ class TMDBService:
     """
     Service layer to interact with The Movie Database (TMDB) API v3.
     It implements caching to reduce redundant network calls and abide by rate limits.
+    Authentication uses TMDB's v3 ``api_key`` query parameter consistently.
     """
     BASE_URL = "https://api.themoviedb.org/3"
-    
-    @classmethod
-    def _get_headers(cls):
-        return {
-            "Authorization": f"Bearer {settings.TMDB_API_KEY}" if len(settings.TMDB_API_KEY) > 40 else "",
-        }
-    
+
     @classmethod
     def _get_api_key_param(cls):
-        # Fallback if they provide the API Key instead of the Bearer Token
         return f"?api_key={settings.TMDB_API_KEY}"
 
     @classmethod
@@ -70,7 +66,10 @@ class TMDBService:
         """
         Search movies by query string. Caches for 1 hour.
         """
-        url = f"{cls.BASE_URL}/search/movie{cls._get_api_key_param()}&query={query}&include_adult=false&language=en-US&page={page}"
+        url = (
+            f"{cls.BASE_URL}/search/movie{cls._get_api_key_param()}"
+            f"&query={quote(query)}&include_adult=false&language=en-US&page={page}"
+        )
         cache_key = f"tmdb_search_{query.replace(' ', '_')}_{page}"
         return cls._fetch_data(url, cache_key, 3600)
         

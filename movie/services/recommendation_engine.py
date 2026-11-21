@@ -27,7 +27,7 @@ class RecommendationEngine:
         Uses TMDB's internal similarity algorithm.
         """
         url = f"{TMDBService.BASE_URL}/movie/{movie_id}/similar{TMDBService._get_api_key_param()}&language=en-US&page=1"
-        response = requests.get(url)
+        response = requests.get(url, timeout=10)
         if response.status_code == 200:
             return response.json()
         return {"error": "Failed to fetch similar movies"}
