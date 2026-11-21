@@ -273,11 +273,25 @@ class Command(BaseCommand):
                         role=role
                     )
 
-            # 2. Cast (Top 4 actors mapped to specific roles for simplicity)
+            # 2. Cast — assign the lead roles using TMDB gender (1 = female,
+            #    2 = male) instead of blindly labelling the 2nd/3rd/4th billed
+            #    cast members as "Main Actress", "Villain" and "Comedian".
+            #    Only genuine lead roles are stored; unknown/invented roles
+            #    would produce factually incorrect crew data.
             cast_list = credits.get('cast', [])
-            role_map = ['Main Actor', 'Main Actress', 'Villain', 'Comedian']
-            for i, c in enumerate(cast_list[:4]):
-                role = role_map[i]
+            has_actor = has_actress = False
+            for c in cast_list:
+                if has_actor and has_actress:
+                    break
+                gender = c.get('gender', 0)
+                if gender == 1 and not has_actress:
+                    role, has_actress = 'Main Actress', True
+                elif gender in (0, 2) and not has_actor:
+                    # TMDB uses 0 for unknown gender; default to Main Actor.
+                    role, has_actor = 'Main Actor', True
+                else:
+                    continue
+
                 p_obj, _ = Person.objects.update_or_create(
                     tmdb_id=c['id'],
                     defaults={'name': c.get('name', 'Unknown')}
