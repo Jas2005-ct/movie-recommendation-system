@@ -170,6 +170,21 @@ class ReviewCreateView(View):
             rating      = data.get('rating')
             review_text = data.get('review_text', '')
 
+            # Django model field validators are not run by Model.objects.create(),
+            # so validate the rating explicitly before writing to the database.
+            try:
+                rating = int(rating)
+            except (TypeError, ValueError):
+                return JsonResponse(
+                    {'error': 'Rating must be an integer between 1 and 5.'},
+                    status=400,
+                )
+            if not 1 <= rating <= 5:
+                return JsonResponse(
+                    {'error': 'Rating must be between 1 and 5.'},
+                    status=400,
+                )
+
             movie = get_object_or_404(Movie, tmdb_id=tmdb_id)
 
             # Sentiment Analysis
