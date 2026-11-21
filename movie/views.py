@@ -190,6 +190,17 @@ class ReviewCreateView(View):
             rating      = data.get('rating')
             review_text = data.get('review_text', '')
 
+            if not isinstance(review_text, str):
+                return JsonResponse(
+                    {'error': 'Review text must be a string.'}, status=400
+                )
+            review_text = review_text.strip()
+            if len(review_text) > 5000:
+                return JsonResponse(
+                    {'error': 'Review text must be 5000 characters or fewer.'},
+                    status=400,
+                )
+
             # Django model field validators are not run by Model.objects.create(),
             # so validate the rating explicitly before writing to the database.
             try:
