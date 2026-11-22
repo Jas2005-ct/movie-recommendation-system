@@ -2,10 +2,13 @@ import json
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
+from .management.commands.sync_watchmode import movie_defaults_from_watchmode
 from .models import EmotionLog, Genre, Movie, MovieGenre, Review, WatchHistory
+from .services import watchmode
 
 
 class ReviewApiTests(TestCase):
@@ -162,3 +165,64 @@ class InteractionApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(EmotionLog.objects.get().emotion, 'happy')
+
+
+class WatchmodeSyncTests(TestCase):
+    def test_mapping_watchmode_to_movie_defaults(self):
+        defaults = movie_defaults_from_watchmode(
+            {'id': 1, 'title': 'Fallback', 'tmdb_id': 123, 'type': 'movie'},
+            {
+                'title': 'Real Title',
+                'type': 'movie',
+                'original_language': 'ta',
+                'release_date': '2024-05-01',
+                'posterLarge': 'https://img.example/poster.jpg',
+                'user_rating': 8.4,
+                'popularity_percentile': 97.5,
+                'plot_overview': 'A Tamil film.',
+            },
+        )
+        self.assertEqual(defaults['title'], 'Real Title')
+        self.assertEqual(defaults['content_type'], 'movie')
+        self.assertEqual(defaults['language'], 'ta')
+        self.assertEqual(defaults['vote_average'], 8.4)
+        self.assertEqual(defaults['poster_path'], 'https://img.example/poster.jpg')
+
+    def test_absolute_poster_url_is_passed_through(self):
+        movie = Movie.objects.create(
+            tmdb_id=7001, title='Poster Test',
+            poster_path='https://img.example/p.jpg',
+            backdrop_path='https://img.example/b.jpg',
+        )
+        self.assertEqual(movie.poster_url, 'https://img.example/p.jpg')
+        self.assertEqual(movie.backdrop_url, 'https://img.example/b.jpg')
+
+    def test_sync_command_upserts_movie_and_genre(self):
+        details = {
+            'title': 'Hindi Hit',
+            'type': 'movie',
+            'original_language': 'hi',
+            'release_date': '2024-05-01',
+            'posterLarge': 'https://img.example/p.jpg',
+            'user_rating': 8.0,
+            'popularity_percentile': 95.0,
+            'genres': [4],
+            'plot_overview': 'A story.',
+        }
+        with patch.object(watchmode, 'status', return_value={'quota': 2500, 'quotaUsed': 0}), \
+             patch.object(watchmode, 'genres', return_value=[
+                 {'id': 4, 'name': 'Comedy', 'tmdb_id': 35}
+             ]), \
+             patch.object(watchmode, 'list_titles', return_value={
+                 'titles': [{'id': 1, 'tmdb_id': 123, 'title': 'Hindi Hit', 'type': 'movie'}],
+                 'total_pages': 1,
+             }), \
+             patch.object(watchmode, 'title_details', return_value=details), \
+             patch.object(watchmode, 'title_cast_crew', return_value=[]):
+            call_command('sync_watchmode', pages=1)
+
+        movie = Movie.objects.get(tmdb_id=123)
+        self.assertEqual(movie.title, 'Hindi Hit')
+        self.assertEqual(movie.language, 'hi')
+        self.assertEqual(movie.poster_url, 'https://img.example/p.jpg')
+        self.assertTrue(movie.genres.filter(name='Comedy').exists())
