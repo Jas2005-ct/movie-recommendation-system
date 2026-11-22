@@ -38,9 +38,13 @@ def _get(path, params=None, max_retries=3):
                 headers={'X-API-Key': api_key},
                 timeout=15,
             )
-            if response.status_code == 401:
+            status = response.status_code
+            if status == 401:
                 raise WatchmodeError('Watchmode rejected the API key (HTTP 401).')
-            if response.status_code == 429 or 500 <= response.status_code < 600:
+            if 400 <= status < 500 and status != 429:
+                # 404/400 are permanent — retrying them wastes credits.
+                raise WatchmodeError(f'Watchmode HTTP {status} for {path}.')
+            if status == 429 or status >= 500:
                 if attempt < max_retries - 1:
                     retry_after = response.headers.get('Retry-After')
                     try:
@@ -50,12 +54,17 @@ def _get(path, params=None, max_retries=3):
                     wait = min(wait, 15)
                     logger.warning(
                         'Watchmode returned %s for %s; retrying in %ss',
-                        response.status_code, path, wait,
+                        status, path, wait,
                     )
                     time.sleep(wait)
                     continue
+                raise WatchmodeError(
+                    f'Watchmode HTTP {status} for {path} after retries.'
+                )
             response.raise_for_status()
             return response.json()
+        except WatchmodeError:
+            raise
         except requests.RequestException as exc:
             logger.warning('Watchmode request failed for %s: %s', path, exc)
             if attempt < max_retries - 1:
