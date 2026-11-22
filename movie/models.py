@@ -120,15 +120,20 @@ class Movie(models.Model):
     # ------------------------------------------------------------------
     @property
     def poster_url(self):
-        if self.poster_path:
-            return f"https://image.tmdb.org/t/p/w500{self.poster_path}"
-        return ''
+        if not self.poster_path:
+            return ''
+        # TMDB stores a path; other providers (e.g. Watchmode) return full URLs.
+        if self.poster_path.startswith(('http://', 'https://')):
+            return self.poster_path
+        return f"https://image.tmdb.org/t/p/w500{self.poster_path}"
 
     @property
     def backdrop_url(self):
-        if self.backdrop_path:
-            return f"https://image.tmdb.org/t/p/original{self.backdrop_path}"
-        return ''
+        if not self.backdrop_path:
+            return ''
+        if self.backdrop_path.startswith(('http://', 'https://')):
+            return self.backdrop_path
+        return f"https://image.tmdb.org/t/p/original{self.backdrop_path}"
 
     @property
     def year(self):
