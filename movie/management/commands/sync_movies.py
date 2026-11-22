@@ -13,6 +13,8 @@ Usage:
 """
 
 import time
+from django.conf import settings
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 from django.db import transaction, models, connection
 from movie.models import Movie, Genre, MovieGenre, Person, MovieCrew
@@ -48,7 +50,14 @@ class Command(BaseCommand):
     # ------------------------------------------------------------------
     def handle(self, *args, **options):
 # ---------------------------------------------------------------------------
-        
+
+        # Env switch: MOVIE_DATA_PROVIDER=watchmode makes this the single entry
+        # point while keeping the original TMDB sync intact as a fallback.
+        if settings.MOVIE_DATA_PROVIDER == 'watchmode':
+            self.stdout.write('Provider: watchmode (MOVIE_DATA_PROVIDER)')
+            call_command('sync_watchmode', pages=options['pages'])
+            return
+
         pages         = options['pages']
         tv_pages      = options['tv_pages']
         skip_details  = options['skip_details']
