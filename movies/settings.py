@@ -24,6 +24,12 @@ if not DEBUG and not SECRET_KEY:
 # TMDB key — only used by management command, never during a user request
 TMDB_API_KEY = os.environ.get('TMDB_API_KEY', '')
 
+# Catalog provider: 'tmdb' (default) or 'watchmode'. Views never call either.
+MOVIE_DATA_PROVIDER = os.environ.get('MOVIE_DATA_PROVIDER', 'tmdb').strip().lower()
+
+# Watchmode (free Developer plan: non-commercial use with attribution).
+WATCHMODE_API_KEY = os.environ.get('WATCHMODE_API_KEY', '')
+
 ALLOWED_HOSTS = [
     host.strip().replace('https://', '').replace('http://', '')
     for host in os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
