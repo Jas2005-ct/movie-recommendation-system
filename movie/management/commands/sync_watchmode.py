@@ -85,6 +85,10 @@ class Command(BaseCommand):
             help='Number of list-titles pages to sync (default: 2).',
         )
         parser.add_argument(
+            '--limit', type=int, default=0,
+            help='Maximum number of titles to sync (0 = no limit).',
+        )
+        parser.add_argument(
             '--page-size', type=int, default=50,
             help='Titles per page (default: 50).',
         )
@@ -102,6 +106,7 @@ class Command(BaseCommand):
         page_size = options['page_size']
         languages = options['languages']
         skip_cast = options['skip_cast']
+        limit = options['limit']
 
         self.stdout.write(self.style.MIGRATE_HEADING('\n=== Watchmode -> PostgreSQL Sync ==='))
 
@@ -121,6 +126,8 @@ class Command(BaseCommand):
             raise CommandError(str(exc))
 
         created = updated = skipped = 0
+        processed = 0
+        self.people_cache = {}
         for page in range(1, pages + 1):
             try:
                 data = watchmode.list_titles(
@@ -136,13 +143,26 @@ class Command(BaseCommand):
 
             titles = data.get('titles', [])
             self.stdout.write(f'  Page {page}: {len(titles)} titles')
-            for item in titles:
+            for position, item in enumerate(titles, start=1):
+                if limit and processed >= limit:
+                    break
+                processed += 1
+                label = str(item.get('title') or '')[:38]
+                self.stdout.write(
+                    f'  [{processed}] {label:<38}', ending='\r'
+                )
+                self.stdout.flush()
+
                 c, u, s = self._upsert_title(item, skip_cast)
                 created += c
                 updated += u
                 skipped += s
-                time.sleep(0.1)
+                # Stay below Watchmode's ~120 requests/minute limit.
+                time.sleep(0.6)
+            self.stdout.write('')
 
+            if limit and processed >= limit:
+                break
             if page >= data.get('total_pages', page):
                 break
 
@@ -234,13 +254,10 @@ class Command(BaseCommand):
         cast = [c for c in credits if c.get('type') == 'Cast']
         cast.sort(key=lambda c: c.get('order') or 999)
         has_actor = has_actress = False
-        for credit in cast[:4]:
+        for credit in cast[:2]:
             if has_actor and has_actress:
                 break
-            try:
-                info = watchmode.person(credit['person_id']) or {}
-            except watchmode.WatchmodeError:
-                info = {}
+            info = self._person_info(credit['person_id'])
             gender = str(info.get('gender') or '').lower()
             if gender.startswith('f') and not has_actress:
                 role, has_actress = 'Main Actress', True
@@ -254,12 +271,19 @@ class Command(BaseCommand):
             )
 
     # ------------------------------------------------------------------
+    def _person_info(self, person_id):
+        """Cache person lookups — actors recur across many titles."""
+        if person_id not in self.people_cache:
+            try:
+                self.people_cache[person_id] = watchmode.person(person_id) or {}
+            except watchmode.WatchmodeError:
+                self.people_cache[person_id] = {}
+            time.sleep(0.3)
+        return self.people_cache[person_id]
+
     def _person(self, credit, info=None):
         if info is None:
-            try:
-                info = watchmode.person(credit['person_id']) or {}
-            except watchmode.WatchmodeError:
-                info = {}
+            info = self._person_info(credit['person_id'])
 
         name = credit.get('full_name') or info.get('full_name') or 'Unknown'
         tmdb_id = info.get('tmdb_id') or None

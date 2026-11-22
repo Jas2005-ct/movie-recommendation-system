@@ -47,7 +47,7 @@ def _get(path, params=None, max_retries=3):
                         wait = float(retry_after) if retry_after else 2 ** attempt
                     except ValueError:
                         wait = 2 ** attempt
-                    wait = min(wait, 60)
+                    wait = min(wait, 15)
                     logger.warning(
                         'Watchmode returned %s for %s; retrying in %ss',
                         response.status_code, path, wait,
