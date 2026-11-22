@@ -4,24 +4,74 @@ Fetches movie/TV metadata from Watchmode and upserts it into the same local
 PostgreSQL tables used by `sync_movies`. Views still never call an external API.
 
 Usage:
-    uv run python manage.py sync_watchmode                # 2 pages (~100 titles)
-    uv run python manage.py sync_watchmode --pages 4      # ~200 titles
-    uv run python manage.py sync_watchmode --skip-cast    # save credits
+    uv run python manage.py sync_watchmode                    # Tamil (default)
+    uv run python manage.py sync_watchmode --telugu          # Telugu
+    uv run python manage.py sync_watchmode --tamil --hindi   # multiple
+    uv run python manage.py sync_watchmode --all-languages   # all six
+    uv run python manage.py sync_watchmode --languages ta,en # explicit codes
+    uv run python manage.py sync_watchmode --skip-cast       # save credits
 
 Free Developer plan notes: non-commercial use with attribution, 2,500 credits
 per month, and cached data must be refreshed within 30 days. Run this command
 monthly to satisfy the refresh rule.
 """
 
+import re
 import time
+from datetime import datetime
 
+from django.core.exceptions import ValidationError
 from django.core.management import CommandError, BaseCommand
-from django.db import transaction
+from django.db import DataError, IntegrityError, transaction
 
 from movie.models import Genre, Movie, MovieCrew, Person
 from movie.services import watchmode
 
-LANGUAGE_CODES = {'hi', 'ta', 'te', 'ml', 'kn', 'en'}
+LANGUAGE_FLAGS = {
+    'hindi': 'hi',
+    'tamil': 'ta',
+    'telugu': 'te',
+    'malayalam': 'ml',
+    'kannada': 'kn',
+    'english': 'en',
+}
+LANGUAGE_CODES = set(LANGUAGE_FLAGS.values())
+DEFAULT_LANGUAGE = 'ta'  # Tamil is the default seed language.
+DATE_FORMATS = (
+    '%Y-%m-%d', '%Y/%m/%d', '%m/%d/%Y',
+    '%B %d, %Y', '%b %d, %Y', '%d %B %Y', '%d %b %Y',
+)
+
+
+def parse_watchmode_date(value):
+    """Return YYYY-MM-DD, or None if the value lacks a usable year."""
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if re.fullmatch(r'\d{4}', text):
+        return f'{text}-01-01'
+    for fmt in DATE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_language_codes(options):
+    """Combine --hindi/--tamil/... with --languages; default to Tamil."""
+    codes = set(options.get('language_codes') or [])
+    if options.get('all_languages'):
+        codes.update(LANGUAGE_CODES)
+    for code in (options.get('languages') or '').split(','):
+        code = code.strip().lower()
+        if code:
+            codes.add(code)
+    if not codes:
+        codes = {DEFAULT_LANGUAGE}
+    return ','.join(sorted(codes))
 CONTENT_TYPE_MAP = {
     'movie': 'movie',
     'tv_movie': 'movie',
@@ -41,9 +91,11 @@ def movie_defaults_from_watchmode(item, details):
     if language not in LANGUAGE_CODES:
         language = 'other'
 
-    release_date = details.get('release_date') or None
+    release_date = parse_watchmode_date(details.get('release_date'))
     if not release_date and details.get('year'):
-        release_date = f"{details['year']}-01-01"
+        year = str(details['year'])[:4]
+        if year.isdigit():
+            release_date = f'{year}-01-01'
 
     poster = (
         details.get('posterLarge') or details.get('posterMedium')
@@ -93,9 +145,21 @@ class Command(BaseCommand):
             help='Titles per page (default: 50).',
         )
         parser.add_argument(
-            '--languages', type=str, default='hi,ta,te,ml,kn',
-            help='Comma-separated ISO 639-1 languages to fetch (default: Indian languages).',
+            '--languages', type=str, default='',
+            help='Extra comma-separated ISO 639-1 codes (e.g. ta,en). Default: tamil.',
         )
+        parser.add_argument(
+            '--all-languages', action='store_true',
+            help='Seed all supported languages (Hindi, Tamil, Telugu, Malayalam, Kannada, English).',
+        )
+        for flag, code in LANGUAGE_FLAGS.items():
+            names = [f'--{flag}']
+            if flag == 'kannada':
+                names.append('--kannadam')
+            parser.add_argument(
+                *names, action='append_const', const=code, dest='language_codes',
+                help=f'Include {flag.title()} titles (repeatable/combinable).',
+            )
         parser.add_argument(
             '--skip-cast', action='store_true',
             help='Skip cast/crew enrichment (saves credits).',
@@ -104,11 +168,12 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         pages = options['pages']
         page_size = options['page_size']
-        languages = options['languages']
+        languages = resolve_language_codes(options)
         skip_cast = options['skip_cast']
         limit = options['limit']
 
         self.stdout.write(self.style.MIGRATE_HEADING('\n=== Watchmode -> PostgreSQL Sync ==='))
+        self.stdout.write(f'  Languages: {languages}')
 
         try:
             quota = watchmode.status()
@@ -143,7 +208,7 @@ class Command(BaseCommand):
 
             titles = data.get('titles', [])
             self.stdout.write(f'  Page {page}: {len(titles)} titles')
-            for position, item in enumerate(titles, start=1):
+            for item in titles:
                 if limit and processed >= limit:
                     break
                 processed += 1
@@ -153,7 +218,13 @@ class Command(BaseCommand):
                 )
                 self.stdout.flush()
 
-                c, u, s = self._upsert_title(item, skip_cast)
+                try:
+                    c, u, s = self._upsert_title(item, skip_cast)
+                except (watchmode.WatchmodeError, ValidationError,
+                        IntegrityError, DataError) as exc:
+                    # One malformed title/person must not abort the whole seed.
+                    self.stderr.write(f'\n  Skipping {label}: {exc}')
+                    c, u, s = 0, 0, 1
                 created += c
                 updated += u
                 skipped += s
@@ -298,8 +369,9 @@ class Command(BaseCommand):
         if info.get('place_of_birth'):
             fields['place_of_birth'] = info['place_of_birth']
         for source, target in (('date_of_birth', 'birthday'), ('date_of_death', 'deathday')):
-            if info.get(source):
-                fields[target] = str(info[source])[:10]
+            parsed = parse_watchmode_date(info.get(source))
+            if parsed:
+                fields[target] = parsed
 
         if tmdb_id:
             person, _ = Person.objects.update_or_create(tmdb_id=tmdb_id, defaults=fields)

@@ -114,10 +114,17 @@ unreachable. The free Developer plan is **non-commercial use with attribution**
    WATCHMODE_API_KEY=your_watchmode_key
    MOVIE_DATA_PROVIDER=watchmode
    ```
-3. Sync the catalog:
+3. Sync the catalog (Tamil by default):
    ```bash
    uv run python manage.py sync_watchmode --pages 2
+   uv run python manage.py sync_watchmode --telugu          # Telugu only
+   uv run python manage.py sync_watchmode --tamil --hindi   # combine languages
+   uv run python manage.py sync_watchmode --all-languages   # all six
+   uv run python manage.py sync_watchmode --languages ta,en # explicit codes
    ```
+   Available flags: `--hindi`, `--tamil`, `--telugu`, `--malayalam`, `--kannada`
+   (alias `--kannadam`), `--english`. They are additive; with no flag the command
+   seeds Tamil titles only.
    `python manage.py sync_movies` also honours `MOVIE_DATA_PROVIDER` and delegates
    to Watchmode when it is set, so TMDB remains available as a fallback — just
    unset the variable to use TMDB again.
@@ -128,8 +135,9 @@ Notes:
 - Watchmode requires cached data to be refreshed within 30 days — run the sync
   monthly.
 - Titles without a TMDB ID are skipped because `Movie.tmdb_id` is the primary key.
-- Bollywood/South Indian titles are requested via the `languages` filter and then
-  verified/assigned locally so the existing HomeView categories keep working.
+- Selected languages are requested server-side (to save credits) and then verified
+  assigned locally so the existing HomeView categories keep working.
+- Malformed titles/people are skipped with a warning instead of aborting the sync.
 
 ---
 
