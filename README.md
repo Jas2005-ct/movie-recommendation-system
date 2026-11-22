@@ -102,6 +102,35 @@ CineMatch features a deep database of Bollywood, South Indian, and International
    uv run python manage.py test
    ```
 
+### Using Watchmode instead of TMDB (optional)
+
+Watchmode is supported as an alternative catalog source. It is useful if TMDB is
+unreachable. The free Developer plan is **non-commercial use with attribution**
+(the attribution is shown in the site footer).
+
+1. Request a free key at <https://api.watchmode.com/requestApiKey/> (no credit card).
+2. Add the key to `.env`:
+   ```env
+   WATCHMODE_API_KEY=your_watchmode_key
+   MOVIE_DATA_PROVIDER=watchmode
+   ```
+3. Sync the catalog:
+   ```bash
+   uv run python manage.py sync_watchmode --pages 2
+   ```
+   `python manage.py sync_movies` also honours `MOVIE_DATA_PROVIDER` and delegates
+   to Watchmode when it is set, so TMDB remains available as a fallback — just
+   unset the variable to use TMDB again.
+
+Notes:
+- Free tier = 2,500 credits/month. A page of 50 titles costs roughly 1 (list) +
+  50 (details) + 50 (cast) + a few person lookups. Use `--skip-cast` to save credits.
+- Watchmode requires cached data to be refreshed within 30 days — run the sync
+  monthly.
+- Titles without a TMDB ID are skipped because `Movie.tmdb_id` is the primary key.
+- Bollywood/South Indian titles are requested via the `languages` filter and then
+  verified/assigned locally so the existing HomeView categories keep working.
+
 ---
 
 ## 📁 Project Structure
